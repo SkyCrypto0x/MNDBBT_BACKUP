@@ -1,0 +1,5 @@
+node_modules/
+dist/
+data/groupSettings.json
+.env
+.env.local

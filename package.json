@@ -1,0 +1,38 @@
+{
+  "name": "bbbbbb-v2",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.6",
+    "dotenv": "^16.6.1",
+    "ethers": "^5.7.2",
+    "node-fetch": "^2.6.9",
+    "telegraf": "^4.16.3",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.10.1",
+    "@types/node-fetch": "^2.6.13",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  },
+  "description": "",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SkyCrypto0x/MNDBBT.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SkyCrypto0x/MNDBBT/issues"
+  },
+  "homepage": "https://github.com/SkyCrypto0x/MNDBBT#readme"
+}
