@@ -49,6 +49,46 @@ const NATIVE_TTL_MS = 30_000;
 const pairInfoCache = new Map<string, { value: any | null; ts: number }>();
 const PAIR_INFO_TTL_MS = 15_000;
 
+// 🔥 NEW: known routers + contract-check cache
+const KNOWN_ROUTERS = new Set(
+  [
+    // nad.fun / অন্য aggregator / router গুলো এখানে অ্যাড করতে পারো
+    "0xe7671fab48a5e213a14238e8e669688cfdfbb02a" // nad.fun উদাহরণ
+  ].map((a) => a.toLowerCase())
+);
+
+const contractCheckCache = new Map<string, boolean>();
+
+async function isContractAddress(chain: ChainId, address: string): Promise<boolean> {
+  const lower = address.toLowerCase();
+
+  if (contractCheckCache.has(lower)) {
+    return contractCheckCache.get(lower)!;
+  }
+
+  try {
+    const runtime = runtimes.get(chain);
+    if (!runtime) {
+      // runtime না থাকলে, safe side এ EOA ধরছি
+      contractCheckCache.set(lower, false);
+      return false;
+    }
+
+    const code = await runtime.provider.getCode(lower);
+    const isContract = !!code && code !== "0x";
+    contractCheckCache.set(lower, isContract);
+    return isContract;
+  } catch (e) {
+    console.warn(
+      `getCode failed for ${lower} on ${chain}`,
+      (e as any)?.message ?? e
+    );
+    // RPC error হলে real buyer miss না করার জন্য contract না ধরে নিচ্ছি
+    contractCheckCache.set(lower, false);
+    return false;
+  }
+}
+
 // Periodic pruning to avoid unbounded Map size
 const CACHE_PRUNE_INTERVAL_MS = 5 * 60_000; // 5 minutes
 
@@ -198,11 +238,6 @@ export function attachSwapListener(
 
 // ────────────────── SWAP HANDLER ──────────────────
 
-// Updated chains.runtime.ts with base token decimals fallback integrated
-// Due to length, only the relevant handleSwap section is shown. (Full file structure preserved)
-
-// ... preceding imports and setup remain unchanged ...
-
 async function handleSwap(
   bot: Telegraf,
   chain: ChainId,
@@ -252,6 +287,22 @@ async function handleSwap(
   const baseIn = isToken0 ? amount1In : amount0In;
   const tokenOut = isToken0 ? amount0Out : amount1Out;
   if (baseIn.lte(0) || tokenOut.lte(0)) return;
+
+  // 🔥 NEW: buyer বের করে router/contract filter
+  const buyer = ethers.utils.getAddress(to);
+  const buyerLower = buyer.toLowerCase();
+
+  // 1) known router / aggregator হলে সরাসরি skip
+  if (KNOWN_ROUTERS.has(buyerLower)) {
+    console.log(`Aggregator/router buy skipped: ${buyer} on ${chain}`);
+    return;
+  }
+
+  // 2) generic contract buyer হলে skip
+  if (await isContractAddress(chain, buyerLower)) {
+    console.log(`Contract buyer skipped: ${buyer} on ${chain}`);
+    return;
+  }
 
   let priceUsd = 0;
   let marketCap = 0;
@@ -432,7 +483,6 @@ async function handleSwap(
 
   const MIN_POSITION_USD = 100;
   let positionIncrease: number | null = null;
-  const buyer = ethers.utils.getAddress(to);
 
   if (usdValue >= MIN_POSITION_USD) {
     try {
@@ -468,24 +518,23 @@ async function handleSwap(
   const tokenAmount = rawTokenAmount;
 
   for (const [groupId, s] of relatedGroups) {
-        const alertData: PremiumAlertData = {
-  usdValue,
-  baseAmount: baseAmount,        // ← ei line ta must change!
-  tokenAmount,
-  tokenAmountDisplay,
-  tokenSymbol,
-  txHash,
-  chain,
-  buyer,
-  positionIncrease,
-  marketCap,
-  volume24h,
-  priceUsd,
-  pairAddress,
-  pairLiquidityUsd,
-  baseSymbol: baseTokenSymbol     // ← USDC / WMON
-};
-
+    const alertData: PremiumAlertData = {
+      usdValue,
+      baseAmount: baseAmount,        // ← এখানে আগের মতোই রেখেছি, শুধু buyer filter যোগ হয়েছে
+      tokenAmount,
+      tokenAmountDisplay,
+      tokenSymbol,
+      txHash,
+      chain,
+      buyer,
+      positionIncrease,
+      marketCap,
+      volume24h,
+      priceUsd,
+      pairAddress,
+      pairLiquidityUsd,
+      baseSymbol: baseTokenSymbol     // ← USDC / WMON
+    };
 
     globalAlertQueue.enqueue({
       groupId,
