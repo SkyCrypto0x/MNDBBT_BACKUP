@@ -53,6 +53,62 @@ const PAIR_INFO_TTL_MS = 15_000;
 const DEX_PAIR_TTL_MS = 8_000; // 8s per pair
 const dexPairCache = new Map<string, { data: any | null; ts: number }>();
 
+// --- GeckoTerminal fallback cache (minimal) ---
+const geckoPairCache = new Map<string, { value: any | null; ts: number }>();
+const GECKO_PAIR_TTL_MS = 10_000; // 10s per pair
+
+async function getGeckoPairInfo(
+  chain: ChainId,
+  pairAddress: string
+): Promise<{
+  priceUsd: number;
+  fdv: number;
+  liquidityUsd: number;
+  volume24h: number;
+} | null> {
+  const geckoNetwork = GECKO_MAP[chain];
+  if (!geckoNetwork) return null; // এই chain Geckoterminal সাপোর্ট না করলে
+
+  const key = `${geckoNetwork}:${pairAddress.toLowerCase()}`;
+  const now = Date.now();
+  const cached = geckoPairCache.get(key);
+  if (cached && now - cached.ts < GECKO_PAIR_TTL_MS) {
+    return cached.value;
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.geckoterminal.com/api/v2/networks/${geckoNetwork}/pools/${pairAddress}`
+    );
+    if (!res.ok) {
+      console.warn(`Gecko HTTP ${res.status} for ${key}`);
+      return cached?.value ?? null;
+    }
+
+    const json: any = await res.json();
+    const attrs = json?.data?.attributes;
+    if (!attrs) return null;
+
+    const value = {
+      priceUsd: Number(attrs.base_token_price_usd ?? 0),
+      fdv: Number(attrs.fdv_usd ?? 0),
+      liquidityUsd: Number(
+        attrs.reserve_in_usd ??
+          attrs.reserve_usd ??
+          attrs.total_reserve_in_usd ??
+          0
+      ),
+      volume24h: Number(attrs.volume_usd_24h ?? 0)
+    };
+
+    geckoPairCache.set(key, { value, ts: now });
+    return value;
+  } catch (e: any) {
+    console.error(`Gecko fetch failed for ${key}:`, e?.message ?? e);
+    return cached?.value ?? null;
+  }
+}
+
 async function getDexPairInfoThrottled(
   chain: ChainId,
   pairAddress: string
@@ -162,6 +218,13 @@ setInterval(() => {
       dexPairCache.delete(key);
     }
   }
+
+  // GeckoTerminal cache: delete entries long past TTL
+  for (const [key, entry] of geckoPairCache.entries()) {
+    if (now - entry.ts > GECKO_PAIR_TTL_MS + 60_000) {
+      geckoPairCache.delete(key);
+    }
+  }
 }, CACHE_PRUNE_INTERVAL_MS);
 
 // per-chain abort controller for hybrid scanners
@@ -172,6 +235,7 @@ export function clearChainCaches() {
   pairInfoCache.clear();
   nativePriceCache.clear();
   dexPairCache.clear(); // 🔥 NEW: also clear DexScreener throttle cache
+  geckoPairCache.clear(); // 🔥 NEW: also clear Gecko fallback cache
 }
 
 // ────────────────── SWAP LISTENER ATTACH (V2+V3+V4) ──────────────────
@@ -386,6 +450,36 @@ async function handleSwap(
     marketCap = p.fdv || 0;
     volume24h = p.volume?.h24 || 0;
     pairLiquidityUsd = p.liquidity?.usd || 0;
+  }
+
+  // 🔁 GeckoTerminal fallback: DexScreener data নাই / একদম zero হলে
+  const needGeckoFallback =
+    (!pairData ||
+      (pairLiquidityUsd === 0 && marketCap === 0 && volume24h === 0)) &&
+    !!GECKO_MAP[chain];
+
+  if (needGeckoFallback) {
+    const geckoInfo = await getGeckoPairInfo(chain, pairAddress);
+    if (geckoInfo) {
+      if (priceUsd === 0 && geckoInfo.priceUsd > 0) {
+        priceUsd = geckoInfo.priceUsd;
+      }
+      if (marketCap === 0 && geckoInfo.fdv > 0) {
+        marketCap = geckoInfo.fdv;
+      }
+      if (pairLiquidityUsd === 0 && geckoInfo.liquidityUsd > 0) {
+        pairLiquidityUsd = geckoInfo.liquidityUsd;
+      }
+      if (volume24h === 0 && geckoInfo.volume24h > 0) {
+        volume24h = geckoInfo.volume24h;
+      }
+
+      console.log(
+        `ℹ️ Gecko fallback used for ${chain}:${pairAddress} (liq=$${pairLiquidityUsd.toFixed(
+          0
+        )}, mc=$${marketCap.toFixed(0)})`
+      );
+    }
   }
 
   let baseTokenSymbol = "";
