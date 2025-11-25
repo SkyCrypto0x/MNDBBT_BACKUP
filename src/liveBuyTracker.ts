@@ -15,15 +15,15 @@ import {
 import { clearAlertCooldowns } from "./alerts.buy";
 
 let syncTimer: NodeJS.Timeout | null = null;
+let trackerRunning = false; // ✅ নতুন flag
 
 // ────────────────── PUBLIC API ──────────────────
 
 export function startLiveBuyTracker(bot: Telegraf) {
-  syncListeners(bot).catch((e) => console.error("Initial sync error:", e));
-  syncTimer = setInterval(
-    () => syncListeners(bot).catch((e) => console.error("Sync error:", e)),
-    15_000
-  );
+  trackerRunning = true;
+
+  // প্রথম sync (overlap ছাড়া)
+  void syncLoop(bot);
 
   // Hybrid new-pool watcher (just logs, no listeners)
   const chainsToWatch = Object.keys(appConfig.chains).filter(
@@ -36,8 +36,9 @@ export function startLiveBuyTracker(bot: Telegraf) {
 }
 
 export async function shutdownLiveBuyTracker() {
+  trackerRunning = false;
   if (syncTimer) {
-    clearInterval(syncTimer);
+    clearTimeout(syncTimer); // ✅ আগে clearInterval ছিল
     syncTimer = null;
   }
 
@@ -109,6 +110,55 @@ export async function clearLiveTrackerCaches(bot: Telegraf) {
   }, 2000);
 
   console.log("🧹 Manual cache clear triggered via /clearcache");
+}
+
+// ────────────────── SYNC LOOP (no overlap) ──────────────────
+
+async function syncLoop(bot: Telegraf) {
+  if (!trackerRunning) return;
+
+  try {
+    await syncListeners(bot);
+  } catch (e) {
+    console.error("Sync error:", e);
+  }
+
+  if (!trackerRunning) return;
+
+  syncTimer = setTimeout(() => {
+    void syncLoop(bot);
+  }, 15_000);
+}
+
+// ────────────────── WS lifecycle helper ──────────────────
+
+function attachWsLifecycle(chain: ChainId, runtime: ChainRuntime) {
+  if (!runtime.isWebSocket) return;
+
+  const anyRuntime = runtime as any;
+  const provAny = runtime.provider as any;
+  const ws = provAny._websocket;
+
+  if (!ws || typeof ws.on !== "function") return;
+
+  anyRuntime.wsDead = false;
+  anyRuntime.lastWsActivity = Date.now();
+
+  ws.on("close", () => {
+    console.warn(`🔌 WS closed for ${chain}`);
+    anyRuntime.wsDead = true;
+  });
+
+  ws.on("error", (err: any) => {
+    console.error(`⚠️ WS error for ${chain}:`, err);
+    anyRuntime.wsDead = true;
+  });
+
+  if (typeof runtime.provider.on === "function") {
+    runtime.provider.on("block", () => {
+      anyRuntime.lastWsActivity = Date.now();
+    });
+  }
 }
 
 // ────────────────── CORE SYNC LOGIC ──────────────────
@@ -227,38 +277,56 @@ async function syncListeners(bot: Telegraf) {
       };
       runtimes.set(chain, runtime);
       console.log(`🔗 Connected to ${chain} RPC (${isWs ? "WS" : "HTTP"})`);
+
+      if (isWs) {
+        attachWsLifecycle(chain, runtime); // ✅ নতুন কল
+      }
     } else if (runtime.isWebSocket) {
+      const anyRuntime = runtime as any;
       const ws = (runtime.provider as any)._websocket;
-      if (!ws || ws.readyState !== 1) {
-        console.warn(`⚠️ WS dead for ${chain}, recreating provider...`);
+
+      const noActivityTooLong =
+        typeof anyRuntime.lastWsActivity === "number" &&
+        Date.now() - anyRuntime.lastWsActivity > 60_000; // 60s inactivity
+
+      if (!ws || ws.readyState !== 1 || anyRuntime.wsDead || noActivityTooLong) {
+        console.warn(
+          `⚠️ WS dead/stale for ${chain} (wsDead=${!!anyRuntime.wsDead}, noActivity=${noActivityTooLong}), recreating provider...`
+        );
         try {
           const newProv = new ethers.providers.WebSocketProvider(
             runtime.rpcUrl
           );
+
+          runtime.provider = newProv;
+          attachWsLifecycle(chain, runtime); // ✅ নতুন কল
+
           // reattach all current pairs to new provider
           for (const [addr, pr] of runtime.pairs.entries()) {
             try {
               pr.v2.removeAllListeners();
               pr.v3?.removeAllListeners();
               pr.v4?.removeAllListeners();
+
+              const newPR = attachSwapListener(
+                bot,
+                chain,
+                addr,
+                newProv,
+                {
+                  token0: pr.token0,
+                  token1: pr.token1
+                },
+                pr.targetToken
+              );
+              runtime.pairs.set(addr, newPR);
             } catch {
               // ignore
             }
-
-            const newPR = attachSwapListener(
-              bot,
-              chain,
-              addr,
-              newProv,
-              {
-                token0: pr.token0,
-                token1: pr.token1
-              },
-              pr.targetToken
-            );
-            runtime.pairs.set(addr, newPR);
           }
-          runtime.provider = newProv;
+
+          anyRuntime.wsDead = false;
+          anyRuntime.lastWsActivity = Date.now();
           console.log(
             `✅ WS reconnected for ${chain} (${runtime.pairs.size} pairs reattached)`
           );
