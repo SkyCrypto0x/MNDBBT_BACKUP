@@ -18,6 +18,9 @@ export class AlertQueue {
   // NEW: hard cap to prevent unbounded growth
   private readonly MAX_QUEUE_SIZE = 5000;
 
+  // 🔥 NEW: কতগুলো job drop হয়েছে, হিসাব রাখার counter
+  private droppedCount = 0;
+
   private timer: NodeJS.Timeout;
 
   constructor(opts: AlertQueueOptions) {
@@ -27,15 +30,19 @@ export class AlertQueue {
   }
 
   enqueue(job: AlertJob) {
-    // NEW: drop oldest if queue is too big
+    // Queue full হলে: একদম পুরনোটা drop + লগ করবো
     if (this.jobs.length >= this.MAX_QUEUE_SIZE) {
-      this.jobs.shift(); // drop oldest
+      const dropped = this.jobs.shift(); // drop oldest
+      this.droppedCount++;
+
       console.warn(
-        `[AlertQueue] Overflow – dropped oldest job, size now ${this.jobs.length}`
+        `[AlertQueue] Overflow – dropped oldest job` +
+          ` (group=${dropped?.groupId ?? "unknown"})` +
+          ` size=${this.jobs.length}/${this.MAX_QUEUE_SIZE}` +
+          ` totalDropped=${this.droppedCount}`
       );
     }
 
-    // existing logic unchanged
     this.jobs.push(job);
   }
 
