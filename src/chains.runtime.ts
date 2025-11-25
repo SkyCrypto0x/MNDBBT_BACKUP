@@ -45,9 +45,53 @@ export const runtimes = new Map<ChainId, ChainRuntime>();
 const nativePriceCache = new Map<string, { value: number; ts: number }>();
 const NATIVE_TTL_MS = 30_000;
 
-// Dex pair info cache
+// Dex pair info cache (legacy – still kept, but main throttling uses dexPairCache)
 const pairInfoCache = new Map<string, { value: any | null; ts: number }>();
 const PAIR_INFO_TTL_MS = 15_000;
+
+// 🔥 NEW: dedicated DexScreener pair cache (throttled + fallback)
+const DEX_PAIR_TTL_MS = 8_000; // 8s per pair
+const dexPairCache = new Map<string, { data: any | null; ts: number }>();
+
+async function getDexPairInfoThrottled(
+  chain: ChainId,
+  pairAddress: string
+): Promise<any | null> {
+  const key = `${chain}:${pairAddress.toLowerCase()}`;
+  const now = Date.now();
+
+  const cached = dexPairCache.get(key);
+  if (cached && now - cached.ts < DEX_PAIR_TTL_MS) {
+    return cached.data;
+  }
+
+  try {
+    const res = await fetch(
+      `https://api.dexscreener.com/latest/dex/pairs/${chain}/${pairAddress}`
+    );
+
+    if (!res.ok) {
+      console.warn(`DexScreener HTTP ${res.status} for ${key}`);
+      // fallback to cached (even if stale) so bot doesn't break
+      return cached?.data ?? null;
+    }
+
+    const json: any = await res.json();
+    const pairsArr = Array.isArray(json?.pairs)
+      ? json.pairs
+      : json?.pair
+      ? [json.pair]
+      : [];
+
+    const data = pairsArr[0] || null;
+    dexPairCache.set(key, { data, ts: now });
+    return data;
+  } catch (e: any) {
+    console.error(`DexScreener fetch failed for ${key}:`, e?.message ?? e);
+    // fallback to last known data if available
+    return cached?.data ?? null;
+  }
+}
 
 // 🔥 NEW: known routers + contract-check cache
 const KNOWN_ROUTERS = new Set(
@@ -62,21 +106,24 @@ const contractCheckCache = new Map<string, boolean>();
 async function isContractAddress(chain: ChainId, address: string): Promise<boolean> {
   const lower = address.toLowerCase();
 
-  if (contractCheckCache.has(lower)) {
-    return contractCheckCache.get(lower)!;
+  // FIX: chain-aware cache key
+  const key = `${chain}:${lower}`;
+
+  if (contractCheckCache.has(key)) {
+    return contractCheckCache.get(key)!;
   }
 
   try {
     const runtime = runtimes.get(chain);
     if (!runtime) {
       // runtime না থাকলে, safe side এ EOA ধরছি
-      contractCheckCache.set(lower, false);
+      contractCheckCache.set(key, false);
       return false;
     }
 
     const code = await runtime.provider.getCode(lower);
     const isContract = !!code && code !== "0x";
-    contractCheckCache.set(lower, isContract);
+    contractCheckCache.set(key, isContract);
     return isContract;
   } catch (e) {
     console.warn(
@@ -84,7 +131,7 @@ async function isContractAddress(chain: ChainId, address: string): Promise<boole
       (e as any)?.message ?? e
     );
     // RPC error হলে real buyer miss না করার জন্য contract না ধরে নিচ্ছি
-    contractCheckCache.set(lower, false);
+    contractCheckCache.set(key, false);
     return false;
   }
 }
@@ -102,10 +149,17 @@ setInterval(() => {
     }
   }
 
-  // pairInfoCache: delete entries long past TTL
+  // pairInfoCache: delete entries long past TTL (legacy – kept for compatibility)
   for (const [key, entry] of pairInfoCache.entries()) {
     if (now - entry.ts > PAIR_INFO_TTL_MS + 5 * 60_000) {
       pairInfoCache.delete(key);
+    }
+  }
+
+  // 🔥 NEW: prune DexScreener cache too
+  for (const [key, entry] of dexPairCache.entries()) {
+    if (now - entry.ts > DEX_PAIR_TTL_MS + 60_000) {
+      dexPairCache.delete(key);
     }
   }
 }, CACHE_PRUNE_INTERVAL_MS);
@@ -117,6 +171,7 @@ const scannerAbortControllers = new Map<ChainId, AbortController>();
 export function clearChainCaches() {
   pairInfoCache.clear();
   nativePriceCache.clear();
+  dexPairCache.clear(); // 🔥 NEW: also clear DexScreener throttle cache
 }
 
 // ────────────────── SWAP LISTENER ATTACH (V2+V3+V4) ──────────────────
@@ -310,32 +365,8 @@ async function handleSwap(
   let tokenSymbol = "TOKEN";
   let pairLiquidityUsd = 0;
 
-  const pairKey = `${chain}:${pairAddress.toLowerCase()}`;
-  const now = Date.now();
-  let pairData: any | null = null;
-  const cachedPair = pairInfoCache.get(pairKey);
-  if (cachedPair && now - cachedPair.ts < PAIR_INFO_TTL_MS) {
-    pairData = cachedPair.value;
-  } else {
-    try {
-      const res = await fetch(
-        `https://api.dexscreener.com/latest/dex/pairs/${chain}/${pairAddress}`
-      );
-      const data: any = await res.json();
-
-      const pairsArr = Array.isArray(data?.pairs)
-        ? data.pairs
-        : data?.pair
-        ? [data.pair]
-        : [];
-
-      pairData = pairsArr[0] || null;
-
-      pairInfoCache.set(pairKey, { value: pairData, ts: now });
-    } catch (e) {
-      console.error("DexScreener fetch failed:", e);
-    }
-  }
+  // 🔥 NEW: use throttled / cached DexScreener helper
+  const pairData: any | null = await getDexPairInfoThrottled(chain, pairAddress);
 
   if (pairData) {
     const p = pairData;
@@ -520,7 +551,7 @@ async function handleSwap(
   for (const [groupId, s] of relatedGroups) {
     const alertData: PremiumAlertData = {
       usdValue,
-      baseAmount: baseAmount,        // ← এখানে আগের মতোই রেখেছি, শুধু buyer filter যোগ হয়েছে
+      baseAmount: baseAmount,        // ← এখানে আগের মতোই রেখেছি, শুধু buyer filter + Dex cache fix হয়েছে
       tokenAmount,
       tokenAmountDisplay,
       tokenSymbol,
