@@ -1,6 +1,7 @@
 import { Telegraf } from "telegraf";
 import { appConfig, ChainId } from "./config";
 import { BuyBotSettings } from "./feature.buyBot";
+import { globalAlertQueue } from "./queue";
 
 // Premium alert data type (unchanged)
 export interface PremiumAlertData {

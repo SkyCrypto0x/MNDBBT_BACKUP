@@ -1,4 +1,5 @@
 import { Telegraf } from "telegraf";
+import "dotenv/config";
 import http from "http";
 import { appConfig } from "./config";
 import { registerBuyBotFeature } from "./feature.buyBot";

@@ -10,7 +10,9 @@ import {
   scanNewPoolsLoop,
   clearChainCaches,
   ChainRuntime,
-  stopAllHybridScanners
+  stopAllHybridScanners,
+  attachNadBondingCurveListener, // 🆕 Nad.fun bonding listener
+  resetNadBondingFlag // 🆕 bonding flag reset helper
 } from "./chains.runtime";
 import { clearAlertCooldowns } from "./alerts.buy";
 
@@ -62,6 +64,9 @@ export async function shutdownLiveBuyTracker() {
         // ignore
       }
     }
+
+    // 🆕 bonding flag reset, যেন পরে fresh attach হতে পারে
+    resetNadBondingFlag(chain);
   }
 
   // Stop background hybrid scanners
@@ -73,7 +78,7 @@ export async function shutdownLiveBuyTracker() {
 
 // Manual clear for /clearcache
 export async function clearLiveTrackerCaches(bot: Telegraf) {
-  for (const [, runtime] of runtimes.entries()) {
+  for (const [chain, runtime] of runtimes.entries()) {
     for (const [, pr] of runtime.pairs.entries()) {
       try {
         pr.v2.removeAllListeners();
@@ -97,6 +102,9 @@ export async function clearLiveTrackerCaches(bot: Telegraf) {
         // ignore
       }
     }
+
+    // 🆕 bonding flag reset here too
+    resetNadBondingFlag(chain);
   }
 
   runtimes.clear();
@@ -192,6 +200,10 @@ async function syncListeners(bot: Telegraf) {
           // ignore
         }
       }
+
+      // 🆕 bonding flag reset when chain removed
+      resetNadBondingFlag(chain);
+
       runtimes.delete(chain);
     }
   }
@@ -279,8 +291,11 @@ async function syncListeners(bot: Telegraf) {
       console.log(`🔗 Connected to ${chain} RPC (${isWs ? "WS" : "HTTP"})`);
 
       if (isWs) {
-        attachWsLifecycle(chain, runtime); // ✅ নতুন কল
+        attachWsLifecycle(chain, runtime);
       }
+
+      // 🆕 Nad.fun BondingCurve listener attach (first time)
+      attachNadBondingCurveListener(bot, chain, runtime);
     } else if (runtime.isWebSocket) {
       const anyRuntime = runtime as any;
       const ws = (runtime.provider as any)._websocket;
@@ -294,12 +309,15 @@ async function syncListeners(bot: Telegraf) {
           `⚠️ WS dead/stale for ${chain} (wsDead=${!!anyRuntime.wsDead}, noActivity=${noActivityTooLong}), recreating provider...`
         );
         try {
+          // 🆕 bonding flag reset so we can re-attach on new provider
+          resetNadBondingFlag(chain);
+
           const newProv = new ethers.providers.WebSocketProvider(
             runtime.rpcUrl
           );
 
           runtime.provider = newProv;
-          attachWsLifecycle(chain, runtime); // ✅ নতুন কল
+          attachWsLifecycle(chain, runtime);
 
           // reattach all current pairs to new provider
           for (const [addr, pr] of runtime.pairs.entries()) {
@@ -324,6 +342,9 @@ async function syncListeners(bot: Telegraf) {
               // ignore
             }
           }
+
+          // 🆕 Nad.fun bonding listener re-attach on the new provider
+          attachNadBondingCurveListener(bot, chain, runtime);
 
           anyRuntime.wsDead = false;
           anyRuntime.lastWsActivity = Date.now();
