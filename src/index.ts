@@ -23,8 +23,7 @@ async function main() {
 
   await bot.telegram.setMyCommands([
     { command: "start", description: "Show bot info / help" },
-    { command: "add", description: "Add or edit token settings" },
-    { command: "testbuy", description: "Preview a premium buy alert" }
+    { command: "add", description: "Add or edit token settings" }
   ]);
 
   await bot.launch();
