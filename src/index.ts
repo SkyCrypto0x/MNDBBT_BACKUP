@@ -22,6 +22,7 @@ async function main() {
   registerBuyBotFeature(bot);
   startLiveBuyTracker(bot);
 
+<<<<<<< HEAD
   // ✅ PRIME FIX: setMyCommands কে non-fatal করা
   try {
     await bot.telegram.setMyCommands([
@@ -38,6 +39,12 @@ async function main() {
   bot.telegram.getMe().then(info => {
     console.log("🤖 Logged in as bot:", info.username);
   });
+=======
+  await bot.telegram.setMyCommands([
+    { command: "start", description: "Show bot info / help" },
+    { command: "add", description: "Add or edit token settings" }
+  ]);
+>>>>>>> b5bcbb8c4d91a651f13eed30f1b573a309cd7c01
 
   await bot.launch();
   console.log("✅ Premium Buy Bot is running with live tracking…");
