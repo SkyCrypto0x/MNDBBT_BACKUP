@@ -1,10 +1,16 @@
 // src/storage.ts - SQLite version (replacing JSON file storage)
 
+import fs from "fs";
 import path from "path";
 import type { BuyBotSettings } from "./feature.buyBot";
 import Database from "better-sqlite3";
 
-const DB_PATH = path.join(__dirname, "..", "data", "groupSettings.db");
+// Render এ Disk mount path: /var/data
+// Local dev এ চাইলে .env এ DATA_DIR=./data
+const DATA_DIR = process.env.DATA_DIR || "/var/data";
+const DB_PATH = path.join(DATA_DIR, "groupSettings.db");
+
+console.log(`🗄️ Using SQLite DB at: ${DB_PATH}`);
 
 // runtime map used by both feature.buyBot and liveBuyTracker
 export const groupSettings = new Map<number, BuyBotSettings>();
@@ -19,7 +25,7 @@ function getDb(): Database.Database {
 
   // ensure directory exists – SQLite নিজেই ফাইল বানিয়ে নেবে
   const dbDir = path.dirname(DB_PATH);
-  require("fs").mkdirSync(dbDir, { recursive: true });
+  if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL"); // better concurrency & durability
@@ -234,3 +240,15 @@ export async function saveGroupSettingsNow() {
 }
 export { db };
 
+process.on("SIGTERM", () => {
+  try {
+    db?.close();
+    console.log("🧹 SQLite closed (SIGTERM)");
+  } catch {}
+});
+process.on("SIGINT", () => {
+  try {
+    db?.close();
+    console.log("🧹 SQLite closed (SIGINT)");
+  } catch {}
+});
