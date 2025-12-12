@@ -137,7 +137,16 @@ export async function sendPremiumBuyAlert(
   }
 
   // ⭐ DexScreener theke paoa baseSymbol > chain-native fallback
-  const baseDisplaySymbol = baseSymbol || baseSymbolText || "NATIVE";
+  const rawBaseSymbol = (baseSymbol || baseSymbolText || "NATIVE").toUpperCase();
+
+  // WETH → ETH, WBNB → BNB, etc. override for display
+  const baseDisplaySymbol =
+    rawBaseSymbol === "WETH"   ? "ETH"   :
+    rawBaseSymbol === "WBNB"   ? "BNB"   :
+    rawBaseSymbol === "WAVAX"  ? "AVAX"  :
+    rawBaseSymbol === "WMATIC" ? "MATIC" :
+    rawBaseSymbol; // অন্য সব (USDC, MONAD, ইত্যাদি) 그대로
+
   const safeBaseSymbol = escapeHtml(baseDisplaySymbol);
 
   const explorerBase =
