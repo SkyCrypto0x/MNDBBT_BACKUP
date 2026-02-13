@@ -7,9 +7,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.6",
+    "axios": "^1.13.5",
+    "better-sqlite3": "^12.6.2",
     "dotenv": "^16.6.1",
-    "ethers": "^5.7.2",
+    "ethers": "^5.8.0",
     "node-fetch": "^2.6.9",
     "telegraf": "^4.16.3",
     "ws": "^8.18.3"

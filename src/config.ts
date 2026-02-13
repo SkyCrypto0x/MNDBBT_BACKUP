@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-export type ChainId = "ethereum" | "bsc" | "base" | "monad";
+export type ChainId = "ethereum" | "bsc" | "base" | "monad" | "megaeth" ;
 
 export interface ChainConfig {
   rpcUrl: string;
@@ -47,6 +47,17 @@ const chains: Record<ChainId, ChainConfig> = {
       process.env.ETH_EXPLORER ||
       rawJson.chains?.ethereum?.explorer ||
       "https://etherscan.io"
+  },
+
+  megaeth: {
+    rpcUrl:
+      process.env.MEGAETH_RPC_URL ||
+      rawJson.chains?.megaeth?.rpcUrl ||
+      "",
+    explorer:
+      process.env.MEGAETH_EXPLORER ||
+      rawJson.chains?.megaeth?.explorer ||
+      "https://mega.etherscan.io"
   },
 
   bsc: {

@@ -24,6 +24,7 @@ export type SimplePairInfo = HybridPair;
 export const GECKO_MAP: Record<string, string> = {
   bsc: "bsc",
   ethereum: "eth",
+  megaeth: "megaeth",
   base: "base",
   monad: "monad",
   arbitrum: "arbitrum",

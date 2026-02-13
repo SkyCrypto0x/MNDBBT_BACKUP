@@ -22,6 +22,8 @@ function normalizeDexChain(raw: any): string | undefined {
   // alias handling
   if (c === "eth") c = "ethereum";
   if (c === "bnb" || c === "bsc") c = "bsc";
+  if (c === "megaeth" || c === "megaethereum") c = "megaeth";
+  if (c === "monad" || c === "monad") c = "monad";
 
   // "base", "monad" etc already okay as-is
   return c;

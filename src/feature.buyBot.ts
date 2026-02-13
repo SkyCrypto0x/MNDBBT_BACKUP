@@ -704,7 +704,7 @@ async function runSetupStep(
               if (detectedChain === "monad") detectedChain = "monad";
             }
 
-            const supportedChains = ["ethereum", "bsc", "base", "monad"];
+            const supportedChains = ["ethereum", "bsc", "base", "monad", "megaeth"];
 
             if (detectedChain && supportedChains.includes(detectedChain)) {
               state.settings.chain = detectedChain as ChainId;

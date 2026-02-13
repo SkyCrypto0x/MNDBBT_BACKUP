@@ -10,6 +10,10 @@
     "ethereum": {
       "rpcUrl": "",
       "explorer": "https://etherscan.io"
+    },
+    "megaeth": {
+      "rpcUrl": "",
+      "explorer": "https://mega.etherscan.io"
     }
   }
 }
