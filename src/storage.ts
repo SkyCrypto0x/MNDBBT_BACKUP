@@ -8,7 +8,8 @@ import Database from "better-sqlite3";
 // Render এ Disk mount path: /var/data
 // Local dev এ চাইলে .env এ DATA_DIR=./data
 const DATA_DIR = process.env.DATA_DIR || "/var/data";
-const DB_PATH = path.join(DATA_DIR, "groupSettings.db");
+const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, "groupSettings.db");
+
 
 console.log(`🗄️ Using SQLite DB at: ${DB_PATH}`);
 
